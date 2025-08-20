@@ -421,3 +421,11 @@ type ValidationIssue struct {
 	Element  string
 	Property string // for CSS issues
 }
+
+// ValidationWarning represents a potential issue with computed styles
+type ValidationWarning struct {
+	Property string
+	Value    string
+	Message  string
+	Severity string // "error", "warning", "info"
+}

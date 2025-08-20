@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"inliner/internal/config"
-	"inliner/internal/resolver"
 	"inliner/pkg/inliner"
 )
 
@@ -180,7 +179,7 @@ func runBatchProcessing(inlinerEngine *inliner.Inliner) error {
 
 	// Process each file
 	var totalStats inliner.ProcessingStats
-	var totalWarnings []resolver.ValidationWarning
+	var totalWarnings []inliner.ValidationWarning
 
 	for i, inputPath := range htmlFiles {
 		if *verbose {
@@ -359,7 +358,7 @@ func showProcessingStats(result *inliner.InlineResult, filename string) {
 }
 
 // showWarnings displays compatibility warnings
-func showWarnings(warnings []resolver.ValidationWarning) {
+func showWarnings(warnings []inliner.ValidationWarning) {
 	if len(warnings) == 0 {
 		return
 	}

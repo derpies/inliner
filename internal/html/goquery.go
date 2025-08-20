@@ -12,13 +12,17 @@ import (
 	"golang.org/x/net/html"
 )
 
+// Compile-time interface verification
+var _ Node = (*GoQueryNode)(nil)
+var _ Document = (*GoQueryDocument)(nil)
+var _ Parser = (*GoQueryParser)(nil)
+
 // GoQueryDocument wraps goquery.Document to implement our Document interface
 type GoQueryDocument struct {
 	doc *goquery.Document
 }
 
 // GoQueryNode wraps goquery.Selection to implement our Node interface
-// Export this type so it can be used in type assertions if needed
 type GoQueryNode struct {
 	selection *goquery.Selection
 	doc       *GoQueryDocument
@@ -339,6 +343,36 @@ func (n *GoQueryNode) RemoveAttribute(name string) error {
 	}
 
 	n.selection.RemoveAttr(name)
+	return nil
+}
+
+// Remove removes the element from the document
+func (n *GoQueryNode) Remove() error {
+	if n.selection.Length() == 0 {
+		return fmt.Errorf("no element to remove")
+	}
+
+	n.selection.Remove()
+	return nil
+}
+
+// SetText sets the text content of the element
+func (n *GoQueryNode) SetText(content string) error {
+	if n.selection.Length() == 0 {
+		return fmt.Errorf("no element to set text on")
+	}
+
+	n.selection.SetText(content)
+	return nil
+}
+
+// SetHTML sets the inner HTML content of the element
+func (n *GoQueryNode) SetHTML(content string) error {
+	if n.selection.Length() == 0 {
+		return fmt.Errorf("no element to set HTML on")
+	}
+
+	n.selection.SetHtml(content)
 	return nil
 }
 
