@@ -31,13 +31,30 @@ func NewWithDefaults() *Inliner {
 	return New(config.Default())
 }
 
+// ValidationWarning represents a potential issue with computed styles
+type ValidationWarning struct {
+	Property string
+	Value    string
+	Message  string
+	Severity string // "error", "warning", "info"
+}
+
+// ValidationIssue represents an email compatibility issue
+type ValidationIssue struct {
+	Type     string // "structure", "css", "attribute"
+	Severity string // "error", "warning", "info"
+	Message  string
+	Element  string
+	Property string // for CSS issues
+}
+
 // InlineResult contains the result of CSS inlining operation
 type InlineResult struct {
-	HTML            string                       // Final HTML with inlined styles
-	InlinedStyles   int                          // Number of styles successfully inlined
-	PreservedRules  int                          // Number of CSS rules preserved in <style> tags
-	Warnings        []resolver.ValidationWarning // Any validation warnings
-	ProcessingStats ProcessingStats              // Performance and processing statistics
+	HTML            string              // Final HTML with inlined styles
+	InlinedStyles   int                 // Number of styles successfully inlined
+	PreservedRules  int                 // Number of CSS rules preserved in <style> tags
+	Warnings        []ValidationWarning // Any validation warnings
+	ProcessingStats ProcessingStats     // Performance and processing statistics
 }
 
 // ProcessingStats contains performance metrics from the inlining process
@@ -89,6 +106,7 @@ func (i *Inliner) Inline(htmlContent string) (*InlineResult, error) {
 	}
 
 	result.HTML = finalHTML
+	result.ProcessingStats.CSSRulesParsed = len(stylesheet.Rules)
 	return result, nil
 }
 
@@ -129,7 +147,7 @@ func (i *Inliner) extractCSS(doc html.Document) (string, error) {
 func (i *Inliner) processDocument(doc html.Document, styleResolver *resolver.Resolver) (*InlineResult, error) {
 	result := &InlineResult{
 		ProcessingStats: ProcessingStats{},
-		Warnings:        []resolver.ValidationWarning{},
+		Warnings:        []ValidationWarning{},
 	}
 
 	// Get all elements in the document
@@ -176,9 +194,16 @@ func (i *Inliner) processElement(element html.Node, styleResolver *resolver.Reso
 	// Merge computed styles with existing inline styles
 	finalStyles := styleResolver.MergeStyles(existingStyles, computedStyles)
 
-	// Validate styles for email compatibility
-	warnings := styleResolver.ValidateStyles(finalStyles)
-	result.Warnings = append(result.Warnings, warnings...)
+	// Convert resolver warnings to our warnings
+	resolverWarnings := styleResolver.ValidateStyles(finalStyles)
+	for _, rw := range resolverWarnings {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Property: rw.Property,
+			Value:    rw.Value,
+			Message:  rw.Message,
+			Severity: rw.Severity,
+		})
+	}
 
 	// Apply the final styles to the element
 	if err := element.SetInlineStyle(finalStyles); err != nil {
@@ -186,6 +211,7 @@ func (i *Inliner) processElement(element html.Node, styleResolver *resolver.Reso
 	}
 
 	result.InlinedStyles += len(finalStyles)
+	result.ProcessingStats.SelectorsMatched++
 	return nil
 }
 
@@ -216,7 +242,7 @@ func (i *Inliner) handleStyleTags(doc html.Document, stylesheet *css.Stylesheet)
 	if i.config.RemoveStyleTags {
 		// Remove all style tags
 		for _, styleTag := range styleTags {
-			if err := i.removeElement(styleTag); err != nil {
+			if err := styleTag.Remove(); err != nil {
 				return fmt.Errorf("failed to remove style tag: %w", err)
 			}
 		}
@@ -229,13 +255,13 @@ func (i *Inliner) handleStyleTags(doc html.Document, stylesheet *css.Stylesheet)
 	if preservedCSS != "" {
 		// Update the first style tag with preserved CSS, remove others
 		if len(styleTags) > 0 {
-			if err := i.updateStyleTagContent(styleTags[0], preservedCSS); err != nil {
+			if err := styleTags[0].SetText(preservedCSS); err != nil {
 				return fmt.Errorf("failed to update style tag: %w", err)
 			}
 
 			// Remove additional style tags
 			for j := 1; j < len(styleTags); j++ {
-				if err := i.removeElement(styleTags[j]); err != nil {
+				if err := styleTags[j].Remove(); err != nil {
 					return fmt.Errorf("failed to remove extra style tag: %w", err)
 				}
 			}
@@ -243,7 +269,7 @@ func (i *Inliner) handleStyleTags(doc html.Document, stylesheet *css.Stylesheet)
 	} else {
 		// No CSS to preserve, remove all style tags
 		for _, styleTag := range styleTags {
-			if err := i.removeElement(styleTag); err != nil {
+			if err := styleTag.Remove(); err != nil {
 				return fmt.Errorf("failed to remove style tag: %w", err)
 			}
 		}
@@ -324,28 +350,6 @@ func (i *Inliner) formatCSSRule(rule css.Rule) string {
 	return fmt.Sprintf("%s {\n%s;\n}", rule.Selector, strings.Join(declarations, ";\n"))
 }
 
-// removeElement removes an element from the document
-func (i *Inliner) removeElement(element html.Node) error {
-	return element.Remove()
-}
-
-// updateStyleTagContent updates the content of a style tag
-func (i *Inliner) updateStyleTagContent(styleTag html.Node, content string) error {
-	return styleTag.SetText(content)
-}
-
-// InlineCSS is a convenience function that inlines CSS with default configuration
-func InlineCSS(htmlContent string) (string, error) {
-	inliner := NewWithDefaults()
-	return inliner.InlineString(htmlContent)
-}
-
-// InlineCSSWithConfig is a convenience function that inlines CSS with custom configuration
-func InlineCSSWithConfig(htmlContent string, cfg config.Config) (string, error) {
-	inliner := New(cfg)
-	return inliner.InlineString(htmlContent)
-}
-
 // ValidateHTML validates HTML for email client compatibility
 func (i *Inliner) ValidateHTML(htmlContent string) ([]ValidationIssue, error) {
 	doc, err := i.htmlParser.Parse(htmlContent)
@@ -413,19 +417,14 @@ func (i *Inliner) validateEmbeddedCSS(doc html.Document) []ValidationIssue {
 	return issues
 }
 
-// ValidationIssue represents an email compatibility issue
-type ValidationIssue struct {
-	Type     string // "structure", "css", "attribute"
-	Severity string // "error", "warning", "info"
-	Message  string
-	Element  string
-	Property string // for CSS issues
+// InlineCSS is a convenience function that inlines CSS with default configuration
+func InlineCSS(htmlContent string) (string, error) {
+	inliner := NewWithDefaults()
+	return inliner.InlineString(htmlContent)
 }
 
-// ValidationWarning represents a potential issue with computed styles
-type ValidationWarning struct {
-	Property string
-	Value    string
-	Message  string
-	Severity string // "error", "warning", "info"
+// InlineCSSWithConfig is a convenience function that inlines CSS with custom configuration
+func InlineCSSWithConfig(htmlContent string, cfg config.Config) (string, error) {
+	inliner := New(cfg)
+	return inliner.InlineString(htmlContent)
 }

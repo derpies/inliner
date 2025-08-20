@@ -154,7 +154,7 @@ func runSingleFile(inlinerEngine *inliner.Inliner) error {
 
 	// Show warnings if requested
 	if *showWarnings && len(result.Warnings) > 0 {
-		showWarnings(result.Warnings)
+		showWarningsFunc(result.Warnings)
 	}
 
 	return nil
@@ -357,8 +357,8 @@ func showProcessingStats(result *inliner.InlineResult, filename string) {
 	fmt.Fprintf(os.Stderr, "  Processing time: %dms\n", result.ProcessingStats.ProcessingTimeMs)
 }
 
-// showWarnings displays compatibility warnings
-func showWarnings(warnings []inliner.ValidationWarning) {
+// showWarningsFunc displays compatibility warnings
+func showWarningsFunc(warnings []inliner.ValidationWarning) {
 	if len(warnings) == 0 {
 		return
 	}
