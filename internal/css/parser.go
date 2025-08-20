@@ -31,13 +31,13 @@ func NewParser() *Parser {
 		declarationRegex: regexp.MustCompile(`([^:]+):\s*([^;]+);?`),
 		importantRegex:   regexp.MustCompile(`!\s*important\s*$`),
 
-		// Specificity calculation regexes
-		idRegex:            regexp.MustCompile(`#[^\s\+>~\.\[:]+`),
-		classRegex:         regexp.MustCompile(`\.[^\s\+>~\.\[:]+`),
+		// Specificity calculation regexes (RE2 compatible)
+		idRegex:            regexp.MustCompile(`#[a-zA-Z0-9_-]+`),
+		classRegex:         regexp.MustCompile(`\.[a-zA-Z0-9_-]+`),
 		attrRegex:          regexp.MustCompile(`\[[^\]]*\]`),
-		pseudoClassRegex:   regexp.MustCompile(`:(?!:)[^\s\+>~\.\[:]+`),
-		elementRegex:       regexp.MustCompile(`(?:^|[\s\+>~])([a-zA-Z]+)(?=[\s\+>~\.\[:#]|$)`),
-		pseudoElementRegex: regexp.MustCompile(`::[^\s\+>~\.\[:]+`),
+		pseudoClassRegex:   regexp.MustCompile(`:[a-zA-Z0-9_-]+`),
+		elementRegex:       regexp.MustCompile(`\b[a-zA-Z]+\b`),
+		pseudoElementRegex: regexp.MustCompile(`::[a-zA-Z0-9_-]+`),
 	}
 }
 
@@ -143,31 +143,37 @@ func (p *Parser) parseDeclarations(declarationsText string) (map[string]Declarat
 func (p *Parser) calculateSpecificity(selector string) Specificity {
 	spec := Specificity{}
 
-	// Remove pseudo-elements first (they don't affect specificity of other components)
-	cleanSelector := p.pseudoElementRegex.ReplaceAllString(selector, "")
-	spec.Elements += len(p.pseudoElementRegex.FindAllString(selector, -1))
+	// Simple approach - count occurrences of each selector type
+	// This is less precise but RE2 compatible
 
 	// Count IDs
-	spec.IDs = len(p.idRegex.FindAllString(cleanSelector, -1))
+	spec.IDs = len(p.idRegex.FindAllString(selector, -1))
 
 	// Count classes
-	spec.Classes += len(p.classRegex.FindAllString(cleanSelector, -1))
+	spec.Classes += len(p.classRegex.FindAllString(selector, -1))
 
 	// Count attributes
-	spec.Classes += len(p.attrRegex.FindAllString(cleanSelector, -1))
+	spec.Classes += len(p.attrRegex.FindAllString(selector, -1))
 
-	// Count pseudo-classes
-	spec.Classes += len(p.pseudoClassRegex.FindAllString(cleanSelector, -1))
+	// Count pseudo-classes (but filter out pseudo-elements)
+	pseudoMatches := p.pseudoClassRegex.FindAllString(selector, -1)
+	for _, match := range pseudoMatches {
+		// Only count single colons, not double colons
+		if !strings.HasPrefix(match, "::") {
+			spec.Classes++
+		}
+	}
 
-	// Count elements (this is trickier - need to avoid counting IDs, classes, etc.)
-	elementMatches := p.elementRegex.FindAllStringSubmatch(cleanSelector, -1)
+	// Count pseudo-elements
+	spec.Elements += len(p.pseudoElementRegex.FindAllString(selector, -1))
+
+	// Count element types
+	elementMatches := p.elementRegex.FindAllString(selector, -1)
 	for _, match := range elementMatches {
-		if len(match) > 1 {
-			element := strings.ToLower(match[1])
-			// Skip pseudo-class keywords that might look like elements
-			if !p.isPseudoClassKeyword(element) {
-				spec.Elements++
-			}
+		element := strings.ToLower(match)
+		// Skip pseudo-class keywords and CSS keywords
+		if !p.isPseudoClassKeyword(element) && !p.isCSSKeyword(element) {
+			spec.Elements++
 		}
 	}
 
@@ -184,9 +190,18 @@ func (p *Parser) isPseudoClassKeyword(s string) bool {
 	return pseudoClasses[s]
 }
 
+// isCSSKeyword checks if a string is a CSS keyword that shouldn't count as an element
+func (p *Parser) isCSSKeyword(s string) bool {
+	keywords := map[string]bool{
+		"and": true, "or": true, "not": true, "only": true,
+		"all": true, "screen": true, "print": true,
+	}
+	return keywords[s]
+}
+
 // removeComments removes CSS comments /* ... */
 func (p *Parser) removeComments(css string) string {
-	commentRegex := regexp.MustCompile(`/\*[^*]*\*+(?:[^/*][^*]*\*+)*/`)
+	commentRegex := regexp.MustCompile(`/\*[^*]*\*+([^/*][^*]*\*+)*/`)
 	return commentRegex.ReplaceAllString(css, "")
 }
 
@@ -195,7 +210,7 @@ func (p *Parser) removeComments(css string) string {
 func (p *Parser) extractAtRules(css string) string {
 	// Simple implementation for now - remove @import, @charset, etc.
 	// Preserve @media for later processing
-	atRuleRegex := regexp.MustCompile(`@(?:import|charset|namespace)[^;]+;`)
+	atRuleRegex := regexp.MustCompile(`@(import|charset|namespace)[^;]+;`)
 	return atRuleRegex.ReplaceAllString(css, "")
 }
 
