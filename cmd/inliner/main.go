@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"inliner/internal/config"
-	"inliner/pkg/inliner"
+	"inliner/internal/inliner"
 )
 
 var (
